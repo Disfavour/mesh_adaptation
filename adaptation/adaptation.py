@@ -31,18 +31,12 @@ def adaptation(define_entities_and_weight_functions, fname=None, fnames_for_step
     fixed_nodes = fix_specified_boundary_nodes(fixed_points)
     relocate_nearest_nodes_to_boundaries(surface_to_curve)
 
-    # node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
-    # node_to_coords = {node: coords for node, coords in zip(node_tags, node_coords.reshape(-1, 3))}
-    # for n in [102, 203, 304, 405]:
-    #     n = np.uint64(n)
-    #     coord = node_to_coords[n]
-    #     inside = gmsh.model.is_inside(1, 5, coord)
-    #     print(n, coord, inside)
-    # gmsh.fltk.run()
-    # exit()
-
     if fnames_for_steps[1] is not None:
         gmsh.write(fnames_for_steps[1])
+    
+    # print(fixed_nodes)
+    # gmsh.fltk.run()
+    # exit()
     
     # algorithm step 3
     curve_to_nodes, plane_surface_to_nodes = classify_nodes()
@@ -50,9 +44,7 @@ def adaptation(define_entities_and_weight_functions, fname=None, fnames_for_step
 
     if fnames_for_steps[2] is not None:
         gmsh.write(fnames_for_steps[2])
-    
-    #gmsh.fltk.run()
-    #exit()
+
     
     boundary_curves = gmsh.model.get_entities(1)
     nodes_of_plane_surfaces = [gmsh.model.mesh.get_nodes(*plane_surface, returnParametricCoord=False)[0] for plane_surface in plane_surfaces]
@@ -118,10 +110,12 @@ def create_initial_uniform_mesh(plane_surface, triangles_in_row):
     xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.get_bounding_box(-1, -1)
     triangle_edge_lenght = (xmax - xmin) / triangles_in_row
     triangle_height = np.sqrt(triangle_edge_lenght ** 2 - (triangle_edge_lenght / 2) ** 2)
-    xmin -= triangle_edge_lenght
-    xmax += triangle_edge_lenght
-    ymin -= triangle_height
-    ymax += triangle_height
+    multiplier = 2
+    xmin -= triangle_edge_lenght * multiplier
+    xmax += triangle_edge_lenght * multiplier
+    ymin -= triangle_height * multiplier
+    ymax += triangle_height * multiplier
+
     #xmin, ymin, zmin, xmax, ymax, zmax = map(lambda x: 1.5 * x, gmsh.model.get_bounding_box(-1, -1))
 
     triangle_edge_lenght = (xmax - xmin) / triangles_in_row
@@ -162,6 +156,7 @@ def fix_specified_boundary_nodes(fixed_points):
     return fixed_nodes
 
 
+# based on edges
 def relocate_nearest_nodes_to_boundaries(surface_to_curve):
     one = np.uint64(1)
     node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
@@ -172,7 +167,69 @@ def relocate_nearest_nodes_to_boundaries(surface_to_curve):
 
     plane_surfaces = gmsh.model.get_entities(2)
 
-    for nodes_of_triangle in triangle_nodes:
+    # нужно пройтись по ребрам, которые пересекают границы
+    gmsh.model.mesh.createEdges()
+    edge_tags, edge_nodes = gmsh.model.mesh.get_all_edges()
+    
+    for edge, nodes_of_edge in zip(edge_tags, edge_nodes.reshape(-1, 2)):
+
+        node_plane_surfaces = []
+        for node_of_edge in nodes_of_edge:
+            node_plane_surfaces.append([])
+            for plane_surface in plane_surfaces:
+                if gmsh.model.is_inside(*plane_surface, node_coords[node_of_edge - one]):
+                    node_plane_surfaces[-1].append(plane_surface)
+
+        # if all nodes in one surface or in outer space ([], [])
+        if set(node_plane_surfaces[0]).intersection(node_plane_surfaces[1]) or not any(node_plane_surfaces):
+            continue
+
+        # two different surfaces or surface and outer space ([])
+        surfaces = tuple(set(node_plane_surfaces[0]).union(node_plane_surfaces[1]))
+
+        boundary_curve = None
+        # two different surfaces
+        if len(surfaces) == 2:
+            boundary_curve = set(surface_to_curve[surfaces[0][1]]).intersection(surface_to_curve[surfaces[1][1]]).pop()
+        # one surface and outer space
+        # Это условие такое себе, тк может быть ребро пересекающее край треугольника (у ребра 1 точка на ребре треугольника)
+        # Тогда получится что мы хотим стянуть второй узел на границу треугольника,
+        # но формально это "1 узел на границе, а 2-й во внешней области", что хорошо по алгоритму
+        # Также из-за этого будут удалены угловые ячейки, тк нода треугольника не принадлежит области
+        elif len(surfaces) == 1:
+            outer_node = nodes_of_edge[node_plane_surfaces.index([])]
+            curves = surface_to_curve[surfaces[0][1]]
+            outer_node_coord = node_coords[outer_node - one]
+            closest_coords_on_curves = np.array([gmsh.model.get_closest_point(1, curve, outer_node_coord)[0] for curve in curves])
+            closest_curve = curves[np.argmin(np.linalg.norm(closest_coords_on_curves - outer_node_coord, axis=1))]
+            boundary_curve = closest_curve
+        else:
+            raise Exception('more than 2 surfaces')
+        
+        coords_of_edge_nodes = [node_coords[node_of_edge - one] for node_of_edge in nodes_of_edge]  # references to numpy
+        closest_coords = [gmsh.model.get_closest_point(1, boundary_curve, coords)[0] for coords in coords_of_edge_nodes]
+        distances = np.linalg.norm(np.array(closest_coords) - np.array(coords_of_edge_nodes), axis=1)
+
+        i = np.argmin(distances)        
+        gmsh.model.mesh.set_node(nodes_of_edge[i], closest_coords[i], [])
+        # Могут возникнуть треугольники 0й площади (если раскоментить), по идее надо просто несмежные ребра обходить (visited edges, visited nodes), но вроде и так норм
+        #node_coords[nodes_of_edge[i] - one] = closest_coords[i]
+
+
+# based on triangles (first attempt)
+def relocate_nearest_nodes_to_boundaries2(surface_to_curve):
+    one = np.uint64(1)
+    node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
+    node_coords = node_coords.reshape(-1, 3)
+
+    triangle_tags, triangle_nodes = gmsh.model.mesh.get_elements_by_type(gmsh.model.mesh.get_element_type("Triangle", 1))
+    triangle_nodes = triangle_nodes.reshape(-1, 3)
+
+    plane_surfaces = gmsh.model.get_entities(2)
+
+    #for qwe in range(1): 
+    # while triangles with nodes in >1 surfaces do
+    for triangle, nodes_of_triangle in zip(triangle_tags, triangle_nodes):
 
         node_plane_surfaces = []
         for node_of_triangle in nodes_of_triangle:
@@ -207,7 +264,7 @@ def relocate_nearest_nodes_to_boundaries(surface_to_curve):
         else:
             raise Exception('more than 2 surfaces')
         
-        coords_of_triangle_nodes = [node_coords[node_of_triangle - one] for node_of_triangle in nodes_of_triangle]
+        coords_of_triangle_nodes = [node_coords[node_of_triangle - one] for node_of_triangle in nodes_of_triangle]  # references to numpy
         closest_coords = [gmsh.model.get_closest_point(1, boundary_curve, coords)[0] for coords in coords_of_triangle_nodes]
         distances = np.linalg.norm(np.array(closest_coords) - np.array(coords_of_triangle_nodes), axis=1)
         move_distance_of_nodes_ij = distances[[i, j]].max()
@@ -243,6 +300,12 @@ def classify_nodes():
                     break
         not_in_curve = True
 
+    # key error в add element by type
+    # Узел может быть граничным, но почему-то будет считаться (gmsh.model.is_inside), что на plane_surface
+    # а мы считаем что серфейс это тока внутренние ноды и потом возникнут проблемы при добавлении элементов
+    # тк там отбираются треугольники которые имеют хотя бы 1 внутреннюю точку (из списка точек серфейса), а у нас она будет как бы граничная
+    # ИТОГ: Баги с isinside, get_closest point (с одного ребра треугольника кидает на другое)
+    
     return curve_to_nodes, plane_surface_to_nodes
 
 
@@ -323,7 +386,10 @@ def example_1():
         points.append(gmsh.model.occ.addPoint(x, y, z))
     flower = gmsh.model.occ.add_bspline(points + [points[0]])
 
-    # Любые фигуры, задаваемые по точкам, задаются через bspline и точки должны быть заданы против часовой стрелки
+    # Любые фигуры, задаваемые по точкам, задаются через bspline
+    # 1) точки должны быть заданы против часовой стрелки
+    # 2) если сплайн первой степени (линейный), то замыкающую точку дублируем 2 раза (начальную точку в конце 2 раза)
+    # 3) если сплайн > 1 степени, то замыкающую точку указываем 1 раз (начальную точку в конце 1 раз)
     # gmsh.model.occ.add_rectangle создает сразу plane_surface, а нужно curve
     rectangle_points = []
     for i in range(-5, 6):
@@ -334,7 +400,7 @@ def example_1():
         rectangle_points.append(gmsh.model.occ.add_point(-5, i, z))
     for i in range(-4, 5):
         rectangle_points.append(gmsh.model.occ.add_point(i, -5, z))
-    rectangle = gmsh.model.occ.add_bspline(rectangle_points + [rectangle_points[0]], degree=1)
+    rectangle = gmsh.model.occ.add_bspline(rectangle_points + [rectangle_points[0]], degree=1)  # [rectangle_points[0], rectangle_points[0]]
 
     curves = [circle, ellipse, circle2, flower, rectangle]
 
@@ -361,8 +427,80 @@ def example_1():
     return curves, curves_of_surfaces, fixed_points, weight_functions, initial_triangles_in_row, number_of_iterations
 
 
+def example_2():
+    z = 0
+
+    circle = gmsh.model.occ.add_circle(0, 0, 0, 1)
+
+    n = 1
+    triangle_points = []
+    A = (0.0000, 3.6000, z)
+    B = (-3.1177, -1.8000, z)
+    C = (3.1177, -1.8000, z)
+
+    point_coords = [A, B, C]
+    for coord1, coord2 in zip(point_coords, np.roll(point_coords, -1, axis=0)):
+        for x, y in zip(np.linspace(coord1[0], coord2[0], n, endpoint=False), np.linspace(coord1[1], coord2[1], n, endpoint=False)):
+            triangle_points.append(gmsh.model.occ.add_point(x, y, z))
+    triangle = gmsh.model.occ.add_bspline(triangle_points + [triangle_points[0], triangle_points[0]], degree=1)
+
+    curves = [circle, triangle]
+
+    curves_of_surfaces = [
+        [circle],
+        [triangle, circle],
+    ]
+
+    fixed_points = [triangle_points[0], triangle_points[n], triangle_points[2*n]]
+
+    weight_functions = [lambda x: 1, lambda x: 1]
+    #weight_functions = [lambda x: (1/2 * (-np.linalg.norm(x) + 1) - 1) ** 4, lambda x: (1/2 * (np.linalg.norm(x) - 1) - 1) ** 4]
+
+    initial_triangles_in_row = 40
+    number_of_iterations = 100
+    
+    return curves, curves_of_surfaces, fixed_points, weight_functions, initial_triangles_in_row, number_of_iterations
+
+
+def example_2_test():
+    z = 0
+
+    n = 1
+    triangle_points = []
+    A = (0.0000, 3.6000, z)
+    B = (-3.1177, -1.8000, z)
+    C = (3.1177, -1.8000, z)
+
+    point_coords = [A, B, C]
+    for coord1, coord2 in zip(point_coords, np.roll(point_coords, -1, axis=0)):
+        for x, y in zip(np.linspace(coord1[0], coord2[0], n, endpoint=False), np.linspace(coord1[1], coord2[1], n, endpoint=False)):
+            triangle_points.append(gmsh.model.occ.add_point(x, y, z))
+    triangle = gmsh.model.occ.add_bspline(triangle_points + [triangle_points[0], triangle_points[0]], degree=1)
+
+    curves = [triangle]
+
+    curves_of_surfaces = [
+        [triangle],
+    ]
+
+    fixed_points = [triangle_points[0], triangle_points[n], triangle_points[2*n]]
+
+    weight_functions = [lambda x: 1]
+    #weight_functions = [lambda x: (1/2 * (-np.linalg.norm(x) + 1) - 1) ** 4, lambda x: (1/2 * (np.linalg.norm(x) - 1) - 1) ** 4]
+
+    initial_triangles_in_row = 25    # 40 12 баги возникают с этими числами
+    number_of_iterations = 100
+    
+    return curves, curves_of_surfaces, fixed_points, weight_functions, initial_triangles_in_row, number_of_iterations
+
+
 if __name__ == '__main__':
     fname = 'meshes/example_1.msh'
     fnames_for_steps = ['meshes/example_1_step_1.msh', 'meshes/example_1_step_2.msh', 'meshes/example_1_step_3.msh']
-    adaptation(example_1, fname, fnames_for_steps, run_gmsh=True)
-    #adaptation(example_1, run_gmsh=True)
+    #adaptation(example_1, fname, fnames_for_steps, run_gmsh=True)
+    #adaptation(example_2, run_gmsh=True)
+
+    experiment = example_2_test
+    #adaptation(experiment, f'meshes/{str(example_2.__name__)}.msh', [f'meshes/{str(example_2.__name__)}_step_{i}.msh' for i in range(1, 4)], run_gmsh=True)
+    #adaptation(experiment, f'meshes/{str(example_2.__name__)}_refine.msh', run_gmsh=True)
+    adaptation(experiment, run_gmsh=True)
