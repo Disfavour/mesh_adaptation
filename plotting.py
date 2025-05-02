@@ -212,26 +212,119 @@ def plot_refining(mesh_name, fname):
     plt.close()
 
 
-def plot_triangle_mesh(fname, mesh_fname):
+def plot_triangle_mesh(fname, mesh_fname, linewidth=1.5, markersize=6):
     gmsh.initialize()
-    
     gmsh.open(mesh_fname)
-
+    gmsh.model.mesh.renumber_nodes()
     triangle_type = gmsh.model.mesh.get_element_type("Triangle", 1)
     triangle_tags, triangle_nodes = gmsh.model.mesh.get_elements_by_type(triangle_type)
     triangle_nodes = triangle_nodes.reshape(-1, 3)
-
     node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
     node_coords = node_coords.reshape(-1, 3)[:, :2]
-
     xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(-1, -1)
-
     gmsh.finalize()
 
     triangulation = Triangulation(node_coords[:, 0], node_coords[:, 1], triangle_nodes - 1)
 
-    plt.figure(figsize=np.array([xmax - xmin, ymax - ymin]) * 1.5)
-    plt.triplot(triangulation, 'o-k')
+    plt.figure(figsize=np.array([xmax - xmin, ymax - ymin]))
+    plt.triplot(triangulation, 'o-b', linewidth=linewidth, markersize=markersize)
+
+    #plt.margins(x=0, y=0)
+    plt.axis('scaled')
+    plt.axis(False)
+    plt.tight_layout(pad=0)
+
+    plt.savefig(fname, transparent=True)
+    #plt.show()
+    plt.close()
+
+
+def plot_function(fname, mesh_fname, f):
+    gmsh.initialize()
+    gmsh.open(mesh_fname)
+    gmsh.model.mesh.renumber_nodes()
+    for i in range(3):
+        gmsh.model.mesh.refine()
+    triangle_type = gmsh.model.mesh.get_element_type("Triangle", 1)
+    triangle_tags, triangle_nodes = gmsh.model.mesh.get_elements_by_type(triangle_type)
+    triangle_nodes = triangle_nodes.reshape(-1, 3)
+    node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
+    node_coords = node_coords.reshape(-1, 3)[:, :2]
+    xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(-1, -1)
+    gmsh.finalize()
+
+    triangulation = Triangulation(node_coords[:, 0], node_coords[:, 1], triangle_nodes - 1)
+
+    plt.figure(figsize=np.array([xmax - xmin, (ymax - ymin) * 1.15]))
+    
+    some_plot = plt.tripcolor(triangulation, [f(x) for x in node_coords], shading='gouraud', norm=mpl.colors.LogNorm())
+
+    plt.colorbar(some_plot, location='bottom', shrink=0.9, fraction=0.05, pad=0)
+
+    #plt.margins(x=0, y=0)
+    plt.axis('scaled')
+    plt.axis(False)
+    plt.tight_layout(pad=0)
+
+    plt.savefig(fname, transparent=True)
+    #plt.show()
+    plt.close()
+
+def plot_function2(fname, mesh_fname, f):
+    gmsh.initialize()
+    gmsh.open(mesh_fname)
+    gmsh.model.mesh.renumber_nodes()
+    triangle_type = gmsh.model.mesh.get_element_type("Triangle", 1)
+    triangle_tags, triangle_nodes = gmsh.model.mesh.get_elements_by_type(triangle_type)
+    triangle_nodes = triangle_nodes.reshape(-1, 3)
+    node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
+    node_coords = node_coords.reshape(-1, 3)[:, :2]
+    xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(-1, -1)
+    gmsh.finalize()
+
+    triangulation = Triangulation(node_coords[:, 0], node_coords[:, 1], triangle_nodes - 1)
+
+    plt.figure(figsize=np.array([xmax - xmin, (ymax - ymin) * 1.15]))
+    
+    weights = [f(x) for x in node_coords]
+    print(min(weights), max(weights))
+    some_plot = plt.tripcolor(triangulation, weights, shading='gouraud')#, norm=mpl.colors.LogNorm())
+
+    plt.colorbar(some_plot, location='bottom', shrink=0.9, fraction=0.05, pad=0)
+
+    #plt.margins(x=0, y=0)
+    plt.axis('scaled')
+    plt.axis(False)
+    plt.tight_layout(pad=0)
+
+    plt.savefig(fname, transparent=True)
+    #plt.show()
+    plt.close()
+
+
+def plot_function_contour(fname, mesh_fname, f):
+    gmsh.initialize()
+    gmsh.open(mesh_fname)
+    gmsh.model.mesh.renumber_nodes()
+    #for i in range(3):
+    #    gmsh.model.mesh.refine()
+    triangle_type = gmsh.model.mesh.get_element_type("Triangle", 1)
+    triangle_tags, triangle_nodes = gmsh.model.mesh.get_elements_by_type(triangle_type)
+    triangle_nodes = triangle_nodes.reshape(-1, 3)
+    node_tags, node_coords, _ = gmsh.model.mesh.get_nodes()
+    node_coords = node_coords.reshape(-1, 3)[:, :2]
+    xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(-1, -1)
+    gmsh.finalize()
+
+    triangulation = Triangulation(node_coords[:, 0], node_coords[:, 1], triangle_nodes - 1)
+
+    plt.figure(figsize=np.array([xmax - xmin, (ymax - ymin) * 1.15]))
+    
+    #some_plot = plt.tripcolor(triangulation, [f(x) for x in node_coords], shading='gouraud', norm=mpl.colors.LogNorm())
+
+    plt.tricontourf(triangulation, [f(x) for x in node_coords], levels=50)
+
+    #plt.colorbar(some_plot, location='bottom', shrink=0.9, fraction=0.05, pad=0)
 
     #plt.margins(x=0, y=0)
     plt.axis('scaled')
@@ -301,17 +394,17 @@ if __name__ == '__main__':
     # os.makedirs(article_dir, exist_ok=True)
     #plot_triangle_mesh('images/example_1.pdf', 'meshes/example_1.msh')
 
-    plot_base_entities('meshes/example_2_step_1.msh', 'images/base_entities.pdf')
+    #plot_base_entities('meshes/example_2_step_1.msh', 'images/base_entities.pdf')
 
-    plot_algorithm_steps('meshes/example_2_step_1.msh', 'images/algorithm_step_1.pdf')
-    plot_algorithm_steps('meshes/example_2_step_2.msh', 'images/algorithm_step_2.pdf')
+    #plot_algorithm_steps('meshes/example_2_step_1.msh', 'images/algorithm_step_1.pdf')
+    #plot_algorithm_steps('meshes/example_2_step_2.msh', 'images/algorithm_step_2.pdf')
     #plot_algorithm_steps('meshes/example_2_step_3.msh', 'images/algorithm_step_3.pdf')
     #plot_algorithm_steps('meshes/example_2.msh', 'images/algorithm_result.pdf')
 
-    plot_algorithm_node_affiliation('meshes/example_2_step_3.msh', 'images/algorithm_step_3.pdf')
-    plot_algorithm_node_affiliation('meshes/example_2.msh', 'images/algorithm_result.pdf')
+    #plot_algorithm_node_affiliation('meshes/example_2_step_3.msh', 'images/algorithm_step_3.pdf')
+    #plot_algorithm_node_affiliation('meshes/example_2.msh', 'images/algorithm_result.pdf')
 
-    plot_refining('meshes/example_2_refine.msh', 'images/algorithm_refine.pdf')
+    #plot_refining('meshes/example_2_refine.msh', 'images/algorithm_refine.pdf')
 
     qualities = [
     'minDetJac',    # the adaptively computed minimal Jacobian determinant
@@ -331,3 +424,52 @@ if __name__ == '__main__':
     
     #plot_triangle_mesh_quality('gamma', 'images/test_gamma.pdf', 'meshes/example_1.msh')
     #plot_triangle_mesh_quality('volume', 'images/test_volume.pdf', 'meshes/example_1.msh')
+
+    i = 11
+    f = lambda x: 0.1 + 1 * np.exp(-(np.linalg.norm(x) - 3) ** 2 / 0.5 ** 2)
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
+
+    i = 12
+    f = lambda x: 0.1 + 1 * np.exp(-(np.linalg.norm(x) - 1.5) ** 2 / 0.25 ** 2)
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
+
+    i = 13
+    # f = lambda x: max(
+    #     1.1 - 1 * np.exp(-(np.abs(x[0]) - 0) ** 16 / 3000 ** 2),
+    #     1.1 - 1 * np.exp(-(np.abs(x[1]) - 0) ** 16 / 100 ** 2))
+    f = lambda x: (1.1 - 1 * np.exp(-(np.abs(x[0]) - 0) ** 16 / 3000 ** 2)) * (1.1 - 1 * np.exp(-(np.abs(x[1]) - 0) ** 16 / 100 ** 2))
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
+
+    i = 14
+    f = lambda x: 0.1 + 1 * np.exp(-(np.linalg.norm(x - np.array((3, -0.5))) - 0) ** 2 / 0.5 ** 2)
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
+
+    i = 15
+    f = lambda x: 0.1 + 1 * np.exp(-(np.linalg.norm(x - np.array((-1, 0.5))) - 0) ** 2 / 0.5 ** 2)
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
+
+    i = 16
+    (x1, y1), (x2, y2) = (-1, -2), (0.7, 2)
+    distance = lambda x: abs((y2 - y1)*x[0] - (x2 - x1)*x[1] + x2*y1 - y2*x1) / np.sqrt((y2 - y1)**2 + (x2 - x1)**2)
+    f = lambda x: 0.1 + 1 * np.exp(-(np.linalg.norm(distance(x)) - 0) ** 2 / 0.5 ** 2)
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
+
+    i = 17
+    (x1, y1), (x2, y2) = (-1, -2), (0.7, 2)
+    distance = lambda x: abs((y2 - y1)*x[0] - (x2 - x1)*x[1] + x2*y1 - y2*x1) / np.sqrt((y2 - y1)**2 + (x2 - x1)**2)
+    f = lambda x: 0.1 + 1 * np.exp(-(np.linalg.norm(distance(x)) - 0) ** 2 / 0.25 ** 2)
+    plot_triangle_mesh(f'images/example_{i}_step_3.pdf', f'meshes/example_{i}_step_3.msh', linewidth=1, markersize=0)
+    plot_triangle_mesh(f'images/example_{i}.pdf', f'meshes/example_{i}.msh', linewidth=1, markersize=0)
+    plot_function(f'images/example_{i}_function.pdf', f'meshes/example_{i}.msh', f)
